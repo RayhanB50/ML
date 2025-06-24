@@ -1,0 +1,136 @@
+# ============ 1. Upload File ============
+from google.colab import files
+uploaded = files.upload()
+
+# ============ 2. Import Library ============
+import pandas as pd
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.impute import SimpleImputer
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import (
+    accuracy_score, precision_score, recall_score, f1_score,
+    roc_auc_score, confusion_matrix, roc_curve
+)
+
+# ============ 3. Load Dataset ============
+# Gantilah dengan nama file yang diupload
+df = pd.read_csv(list(uploaded.keys())[0])
+
+# ============ 4. Binarisasi Target ============
+df['productivity_class'] = df['actual_productivity_score'].apply(lambda x: 1 if x >= 6 else 0)
+df.drop(columns=['actual_productivity_score', 'perceived_productivity_score'], inplace=True)
+
+# ============ 5. Tangani Missing Value ============
+num_cols = df.select_dtypes(include=['float64', 'int64']).columns
+cat_cols = df.select_dtypes(include=['object', 'bool']).columns
+
+num_imputer = SimpleImputer(strategy='median')
+cat_imputer = SimpleImputer(strategy='most_frequent')
+
+df[num_cols] = num_imputer.fit_transform(df[num_cols])
+df[cat_cols] = cat_imputer.fit_transform(df[cat_cols])
+
+# ============ 6. Encoding ============
+encoder = LabelEncoder()
+for col in cat_cols:
+    df[col] = encoder.fit_transform(df[col])
+
+# ============ 7. Split Data ============
+X = df.drop(columns=['productivity_class'])
+y = df['productivity_class']
+
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X_scaled, y, test_size=0.2, random_state=42
+)
+
+# ============ 8. Train Random Forest ============
+rf = RandomForestClassifier(random_state=42)
+rf.fit(X_train, y_train)
+
+# ============ 9. Prediksi & Evaluasi ============
+y_pred = rf.predict(X_test)
+y_proba = rf.predict_proba(X_test)[:, 1]
+
+acc = accuracy_score(y_test, y_pred)
+prec = precision_score(y_test, y_pred)
+rec = recall_score(y_test, y_pred)
+f1 = f1_score(y_test, y_pred)
+roc_auc = roc_auc_score(y_test, y_proba)
+cm = confusion_matrix(y_test, y_pred)
+
+print(f"\n📊 Evaluation Metrics:")
+print(f"Accuracy: {acc:.4f}")
+print(f"Precision: {prec:.4f}")
+print(f"Recall: {rec:.4f}")
+print(f"F1 Score: {f1:.4f}")
+print(f"ROC AUC: {roc_auc:.4f}")
+print(f"Confusion Matrix:\n{cm}")
+
+# ============ 10. Feature Importance ============
+importances = rf.feature_importances_
+features = X.columns
+feat_importance = pd.DataFrame({
+    'Feature': features,
+    'Importance': importances
+}).sort_values(by='Importance', ascending=False)
+
+print("\n🔥 Top 10 Fitur Penting:")
+print(feat_importance.head(10))
+
+# ============ 11. Cek Kontribusi Fitur Sosial Media ============
+social_features = [
+    'daily_social_media_time',
+    'screen_time_before_sleep',
+    'number_of_notifications',
+    'weekly_offline_hours'
+]
+
+social_importance = feat_importance[feat_importance['Feature'].isin(social_features)]
+total_importance = feat_importance['Importance'].sum()
+social_total = social_importance['Importance'].sum()
+social_percent = (social_total / total_importance) * 100
+
+print("\n🔍 Persentase kontribusi fitur sosial media terhadap model:")
+for _, row in social_importance.iterrows():
+    print(f"- {row['Feature']}: {row['Importance']*100:.2f}%")
+
+print(f"\n🎯 Total kontribusi fitur sosial media: {social_percent:.2f}%")
+
+# ============ 12. Persentase Prediksi Produktif / Tidak ============
+unique, counts = np.unique(y_pred, return_counts=True)
+total_pred = sum(counts)
+class_labels = ['Tidak Produktif', 'Produktif']
+print("\n📈 Persentase Hasil Prediksi:")
+for label, count in zip(class_labels, counts):
+    print(f"- {label}: {100 * count / total_pred:.2f}%")
+
+# ============ 13. Visualisasi ============
+plt.figure(figsize=(14, 6))
+
+# ROC Curve
+fpr, tpr, _ = roc_curve(y_test, y_proba)
+plt.subplot(1, 2, 1)
+plt.plot(fpr, tpr, label=f'AUC = {roc_auc:.2f}', color='darkorange')
+plt.plot([0, 1], [0, 1], linestyle='--', color='gray')
+plt.title('ROC Curve')
+plt.xlabel('False Positive Rate')
+plt.ylabel('True Positive Rate')
+plt.legend()
+
+# Confusion Matrix
+plt.subplot(1, 2, 2)
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues')
+plt.title('Confusion Matrix')
+plt.xlabel('Predicted')
+plt.ylabel('Actual')
+
+plt.tight_layout()
+plt.show()
